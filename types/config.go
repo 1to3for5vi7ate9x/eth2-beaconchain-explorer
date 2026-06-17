@@ -73,6 +73,10 @@ type Config struct {
 			PageSize int32  `yaml:"pageSize" envconfig:"INDEXER_NODE_PAGE_SIZE"`
 		} `yaml:"node"`
 		Eth1DepositContractFirstBlock uint64 `yaml:"eth1DepositContractFirstBlock" envconfig:"INDEXER_ETH1_DEPOSIT_CONTRACT_FIRST_BLOCK"`
+		// StartSlot anchors the slot exporter for current-forward indexing on a fresh DB.
+		// When > 0 and the DB has no blocks, the exporter starts from StartSlot+1 instead of
+		// genesis, and the firstRun genesis/gap backfill is skipped (no historical states needed).
+		StartSlot                     uint64 `yaml:"startSlot" envconfig:"INDEXER_START_SLOT"`
 		PubKeyTagsExporter            struct {
 			Enabled bool `yaml:"enabled" envconfig:"PUBKEY_TAGS_EXPORTER_ENABLED"`
 		} `yaml:"pubkeyTagsExporter"`

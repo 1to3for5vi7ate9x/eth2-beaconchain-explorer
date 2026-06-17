@@ -40,7 +40,10 @@ func RunSlotExporter(client rpc.Client, firstRun bool) error {
 		}
 
 		if len(dbSlots) > 0 {
-			if dbSlots[0] != 0 {
+			// current-forward mode: when anchored at a StartSlot, do NOT treat a missing
+			// genesis slot as a gap to backfill (would otherwise re-export genesis and fill
+			// every slot down to 0 on each firstRun/restart).
+			if dbSlots[0] != 0 && utils.Config.Indexer.StartSlot == 0 {
 				logger.Infof("exporting genesis slot as it is missing in the database")
 				err := ExportSlot(client, 0, utils.EpochOfSlot(0) == head.HeadEpoch, tx)
 				if err != nil {
@@ -79,12 +82,19 @@ func RunSlotExporter(client rpc.Client, firstRun bool) error {
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			logger.Infof("db is empty, export genesis slot")
-			err := ExportSlot(client, 0, utils.EpochOfSlot(0) == head.HeadEpoch, tx)
-			if err != nil {
-				return fmt.Errorf("error exporting slot %v: %w", 0, err)
+			if utils.Config.Indexer.StartSlot > 0 {
+				// current-forward mode: anchor at StartSlot instead of genesis so the
+				// exporter begins at StartSlot+1 (no historical states required).
+				logger.Infof("db is empty, current-forward mode: anchoring slot exporter at start slot %v", utils.Config.Indexer.StartSlot)
+				lastDbSlot = utils.Config.Indexer.StartSlot
+			} else {
+				logger.Infof("db is empty, export genesis slot")
+				err := ExportSlot(client, 0, utils.EpochOfSlot(0) == head.HeadEpoch, tx)
+				if err != nil {
+					return fmt.Errorf("error exporting slot %v: %w", 0, err)
+				}
+				lastDbSlot = 0
 			}
-			lastDbSlot = 0
 		} else {
 			return fmt.Errorf("error retrieving last slot from the db: %w", err)
 		}
