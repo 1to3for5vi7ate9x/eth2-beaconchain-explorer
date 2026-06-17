@@ -25,6 +25,7 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -120,7 +121,12 @@ func InitBigtableWithCache(project, instance, chainId string, rdc RedisClient) (
 	}
 
 	poolSize := 50
-	btClient, err := gcp_bigtable.NewClient(ctx, project, instance, option.WithGRPCConnectionPool(poolSize))
+	btClient, err := gcp_bigtable.NewClient(ctx, project, instance,
+		option.WithGRPCConnectionPool(poolSize),
+		// Hoodi-scale rows (e.g. 560048:lastAttestationSlot for ~1.06M validators)
+		// exceed the gRPC default 4MB client recv limit; raise to 256MiB.
+		option.WithGRPCDialOption(grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(256<<20))),
+	)
 	if err != nil {
 		return nil, err
 	}
