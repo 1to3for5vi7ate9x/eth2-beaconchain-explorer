@@ -7,7 +7,7 @@ ALTER TABLE eth1_deposits ADD COLUMN IF NOT EXISTS from_address_text TEXT NOT NU
 
 SELECT 'create new eth1_deposits index for from_address_text'; 
 -- +goose StatementBegin
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_eth1_deposits_from_address_text ON eth1_deposits (from_address_text);
+CREATE INDEX IF NOT EXISTS idx_eth1_deposits_from_address_text ON eth1_deposits (from_address_text);
 -- +goose StatementEnd
 
 SELECT 'populate new eth1_deposits column from_address_text, 1000 at a time'; 
