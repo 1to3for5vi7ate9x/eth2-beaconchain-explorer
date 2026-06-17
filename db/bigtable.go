@@ -660,7 +660,7 @@ func (bigtable *Bigtable) SaveAttestationDuties(duties map[types.Slot]map[types.
 	}
 	bigtable.LastAttestationCacheMux.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*15)
 	defer cancel()
 
 	start := time.Now()
@@ -691,17 +691,6 @@ func (bigtable *Bigtable) SaveAttestationDuties(duties map[types.Slot]map[types.
 					bigtable.LastAttestationCache[uint64(validator)] = uint64(attestedSlot)
 					mutLastAttestationSlotCount++
 
-					if mutLastAttestationSlotCount == MAX_BATCH_MUTATIONS {
-						mutStart := time.Now()
-						err := bigtable.tableValidators.Apply(ctx, fmt.Sprintf("%s:lastAttestationSlot", bigtable.chainId), mutLastAttestationSlot)
-						if err != nil {
-							bigtable.LastAttestationCacheMux.Unlock()
-							return fmt.Errorf("error applying last attestation slot mutations: %v", err)
-						}
-						mutLastAttestationSlot = gcp_bigtable.NewMutation()
-						mutLastAttestationSlotCount = 0
-						logger.Infof("applied last attestation slot mutations in %v", time.Since(mutStart))
-					}
 				}
 			}
 			bigtable.LastAttestationCacheMux.Unlock()
