@@ -180,7 +180,12 @@ func RunSlotExporter(client rpc.Client, firstRun bool) error {
 				epoch := utils.EpochOfSlot(dbSlot.Slot)
 				epochParticipationStats, err := client.GetValidatorParticipation(epoch - 1)
 				if err != nil {
-					return fmt.Errorf("error retrieving epoch participation statistics for epoch %v: %w", epoch, err)
+					// Non-fatal: a non-archive beacon node prunes recently-finalized
+					// states, so validator_inclusion can 404 if we briefly lag near an
+					// epoch boundary. Skip participation/queue for this epoch instead of
+					// failing the whole run (which would roll back and permanently stall
+					// once the state is gone). The epoch is still exported without stats.
+					logger.Warnf("skipping participation stats for epoch %v (state unavailable on non-archive node): %v", epoch, err)
 				} else {
 					logger.Printf("updating epoch %v with participation rate %v", epoch, epochParticipationStats.GlobalParticipationRate)
 					err := db.UpdateEpochStatus(epochParticipationStats, tx)
@@ -321,7 +326,12 @@ func ExportSlot(client rpc.Client, slot uint64, isHeadEpoch bool, tx *sqlx.Tx) e
 				var err error
 				epochParticipationStats, err = client.GetValidatorParticipation(epoch - 1)
 				if err != nil {
-					return fmt.Errorf("error retrieving epoch participation statistics: %w", err)
+					// Non-fatal: non-archive nodes prune recently-finalized states, so
+					// this can 404 when briefly lagging. Leave epochParticipationStats
+					// nil; the `!= nil` guard below skips the stats update for this epoch
+					// rather than failing/rolling back the whole run.
+					logger.Warnf("skipping participation stats for epoch %v (state unavailable on non-archive node): %v", epoch, err)
+					epochParticipationStats = nil
 				}
 				return nil
 			})

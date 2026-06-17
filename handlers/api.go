@@ -1734,8 +1734,13 @@ func getApiValidator(w http.ResponseWriter, r *http.Request) {
 
 	lastExportedDay, err := services.LatestExportedStatisticDay()
 	if err != nil {
-		sendServerErrorResponse(w, r.URL.String(), "error retrieving data, please try again later")
-		return
+		// No validator statistics exported yet (fresh current-forward deploy with
+		// <1 day indexed, or the statistics service hasn't run a full day). Degrade
+		// gracefully: return core validator data (status, balance, pubkey, withdrawals
+		// from chain) without the historical daily-stat withdrawal total, instead of
+		// failing the whole endpoint.
+		logger.Warnf("no exported statistic day yet, serving validator data without daily stats: %v", err)
+		lastExportedDay = 0
 	}
 	_, lastEpochOfDay := utils.GetFirstAndLastEpochForDay(lastExportedDay)
 	cutoffSlot := (lastEpochOfDay * utils.Config.Chain.ClConfig.SlotsPerEpoch) + 1
