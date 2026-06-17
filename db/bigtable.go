@@ -26,6 +26,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -121,14 +122,38 @@ func InitBigtableWithCache(project, instance, chainId string, rdc RedisClient) (
 	}
 
 	poolSize := 50
-	btClient, err := gcp_bigtable.NewClient(ctx, project, instance,
-		option.WithGRPCConnectionPool(poolSize),
-		// Hoodi-scale rows (e.g. 560048:lastAttestationSlot for ~1.06M validators)
-		// exceed the gRPC default 4MB client recv limit; raise to 256MiB.
-		option.WithGRPCDialOption(grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(256<<20))),
-	)
-	if err != nil {
-		return nil, err
+	// Hoodi-scale rows/mutations (e.g. per-slot attestations & 560048:lastAttestationSlot
+	// for ~1.06M validators) exceed the gRPC default 4MB message limit; raise to 256MiB.
+	const maxBtMsgSize = 256 << 20
+	var btClient *gcp_bigtable.Client
+	if utils.Config.Bigtable.Emulator {
+		// The bigtable client library's emulator code path dials BIGTABLE_EMULATOR_HOST
+		// itself and ignores user-supplied dial options, so we dial the emulator
+		// connection ourselves with raised message limits and inject it via WithGRPCConn.
+		emulatorAddr := fmt.Sprintf("%s:%d", utils.Config.Bigtable.EmulatorHost, utils.Config.Bigtable.EmulatorPort)
+		conn, err := grpc.Dial(emulatorAddr,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(maxBtMsgSize),
+				grpc.MaxCallSendMsgSize(maxBtMsgSize),
+			),
+		)
+		if err != nil {
+			return nil, err
+		}
+		btClient, err = gcp_bigtable.NewClient(ctx, project, instance, option.WithGRPCConn(conn))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		btClient, err = gcp_bigtable.NewClient(ctx, project, instance,
+			option.WithGRPCConnectionPool(poolSize),
+			option.WithGRPCDialOption(grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxBtMsgSize))),
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	bt := &Bigtable{
