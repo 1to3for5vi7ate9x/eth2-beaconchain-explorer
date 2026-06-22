@@ -1543,6 +1543,37 @@ func (bigtable *Bigtable) GetLastAttestationSlots(validators []uint64) (map[uint
 	return res, nil
 }
 
+// GetLastAttestationSlotsCached returns the last attestation slot for the given
+// validators from the in-memory LastAttestationCache (populated at startup and
+// kept current every epoch). This avoids re-reading the single ~1.4M-column
+// "<chainId>:lastAttestationSlot" wide row on every request — a multi-second read
+// against the postgres-backed emulator at Hoodi scale. An empty validators slice
+// returns the whole cache (matching GetLastAttestationSlots). Falls back to the
+// Bigtable read while the cache is still being initialized.
+func (bigtable *Bigtable) GetLastAttestationSlotsCached(validators []uint64) (map[uint64]uint64, error) {
+	bigtable.LastAttestationCacheMux.Lock()
+	if bigtable.LastAttestationCache != nil {
+		var res map[uint64]uint64
+		if len(validators) == 0 {
+			res = make(map[uint64]uint64, len(bigtable.LastAttestationCache))
+			for v, slot := range bigtable.LastAttestationCache {
+				res[v] = slot
+			}
+		} else {
+			res = make(map[uint64]uint64, len(validators))
+			for _, v := range validators {
+				if slot, ok := bigtable.LastAttestationCache[v]; ok {
+					res[v] = slot
+				}
+			}
+		}
+		bigtable.LastAttestationCacheMux.Unlock()
+		return res, nil
+	}
+	bigtable.LastAttestationCacheMux.Unlock()
+	return bigtable.GetLastAttestationSlots(validators)
+}
+
 // Clickhouse port: Done
 func (bigtable *Bigtable) GetValidatorMissedAttestationHistory(validators []uint64, startEpoch uint64, endEpoch uint64) (map[uint64]map[uint64]bool, error) {
 	if utils.Config.ClickHouseEnabled && time.Since(utils.EpochToTime(endEpoch)) > utils.Config.ClickhouseDelay { // fetch data from clickhouse instead

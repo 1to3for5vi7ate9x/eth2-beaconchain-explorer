@@ -1583,7 +1583,7 @@ func getGeneralValidatorInfoForAppDashboard(queryIndices []uint64) ([]interface{
 	var lastAttestationSlots map[uint64]uint64
 	g.Go(func() error {
 		var err error
-		lastAttestationSlots, err = db.BigtableClient.GetLastAttestationSlots(queryIndices)
+		lastAttestationSlots, err = db.BigtableClient.GetLastAttestationSlotsCached(queryIndices)
 		if err != nil {
 			return fmt.Errorf("error in GetLastAttestationSlots: %w", err)
 		}
@@ -1812,7 +1812,7 @@ func getApiValidator(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	lastAttestationSlots, err := db.BigtableClient.GetLastAttestationSlots(queryIndices)
+	lastAttestationSlots, err := db.BigtableClient.GetLastAttestationSlotsCached(queryIndices)
 	if err != nil {
 		SendBadRequestResponse(w, r.URL.String(), fmt.Sprintf("error getting validator last attestation slots from bigtable: %v", err))
 		return
@@ -3638,7 +3638,7 @@ func GetMobileWidgetStats(w http.ResponseWriter, r *http.Request, indexOrPubkey 
 		return
 	}
 
-	lastAttestationSlots, err := db.BigtableClient.GetLastAttestationSlots(queryIndices)
+	lastAttestationSlots, err := db.BigtableClient.GetLastAttestationSlotsCached(queryIndices)
 	if err != nil {
 		SendBadRequestResponse(w, r.URL.String(), "error retrieving validator balance data")
 		return

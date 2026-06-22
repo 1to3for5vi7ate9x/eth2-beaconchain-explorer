@@ -378,7 +378,7 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lastAttestationSlots, err := db.BigtableClient.GetLastAttestationSlots([]uint64{index})
+	lastAttestationSlots, err := db.BigtableClient.GetLastAttestationSlotsCached([]uint64{index})
 	if err != nil {
 		utils.LogError(err, "error getting last attestation slots from bigtable", 0, errFields)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
