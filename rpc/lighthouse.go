@@ -1147,19 +1147,50 @@ func (lc *LighthouseClient) blockFromResponse(parsedHeaders *StandardBeaconHeade
 			return nil, fmt.Errorf("error receiving epoch assignment for epoch %v: %w", a.Data.Slot/utils.Config.Chain.ClConfig.SlotsPerEpoch, err)
 		}
 
-		for i := uint64(0); i < aggregationBits.Len(); i++ {
-			if aggregationBits.BitAt(i) {
-				validator, found := assignments.AttestorAssignments[utils.FormatAttestorAssignmentKey(a.Data.Slot, a.Data.CommitteeIndex, i)]
-				if !found { // This should never happen!
-					validator = 0
-					logger.Errorf("error retrieving assigned validator for attestation %v of block %v for slot %v committee index %v member index %v", i, block.Slot, a.Data.Slot, a.Data.CommitteeIndex, i)
+		if len(attestation.CommitteeBits) > 0 {
+			// EIP-7549 (Electra+): attestation.Data.Index is always 0; the participating committees
+			// are encoded in committee_bits, and aggregation_bits is the concatenation of each
+			// participating committee's bits, ordered by ascending committee index then by validator
+			// index within the committee. Walk committees in order, consuming one aggregation bit per
+			// committee member.
+			committeeBits := utils.MustParseHex(attestation.CommitteeBits)
+			bitOffset := uint64(0)
+			for c := uint64(0); c < uint64(len(committeeBits))*8; c++ {
+				if committeeBits[c/8]&(1<<(c%8)) == 0 {
+					continue // committee c did not participate in this attestation
 				}
-				a.Attesters = append(a.Attesters, validator)
+				for p := uint64(0); bitOffset < aggregationBits.Len(); p++ {
+					validator, found := assignments.AttestorAssignments[utils.FormatAttestorAssignmentKey(a.Data.Slot, c, p)]
+					if !found {
+						break // exhausted committee c's members
+					}
+					if aggregationBits.BitAt(bitOffset) {
+						a.Attesters = append(a.Attesters, validator)
+						if block.AttestationDuties[types.ValidatorIndex(validator)] == nil {
+							block.AttestationDuties[types.ValidatorIndex(validator)] = []types.Slot{types.Slot(a.Data.Slot)}
+						} else {
+							block.AttestationDuties[types.ValidatorIndex(validator)] = append(block.AttestationDuties[types.ValidatorIndex(validator)], types.Slot(a.Data.Slot))
+						}
+					}
+					bitOffset++
+				}
+			}
+		} else {
+			// pre-Electra: a single committee at Data.Index; aggregation_bits is indexed within it.
+			for i := uint64(0); i < aggregationBits.Len(); i++ {
+				if aggregationBits.BitAt(i) {
+					validator, found := assignments.AttestorAssignments[utils.FormatAttestorAssignmentKey(a.Data.Slot, a.Data.CommitteeIndex, i)]
+					if !found { // This should never happen!
+						validator = 0
+						logger.Errorf("error retrieving assigned validator for attestation %v of block %v for slot %v committee index %v member index %v", i, block.Slot, a.Data.Slot, a.Data.CommitteeIndex, i)
+					}
+					a.Attesters = append(a.Attesters, validator)
 
-				if block.AttestationDuties[types.ValidatorIndex(validator)] == nil {
-					block.AttestationDuties[types.ValidatorIndex(validator)] = []types.Slot{types.Slot(a.Data.Slot)}
-				} else {
-					block.AttestationDuties[types.ValidatorIndex(validator)] = append(block.AttestationDuties[types.ValidatorIndex(validator)], types.Slot(a.Data.Slot))
+					if block.AttestationDuties[types.ValidatorIndex(validator)] == nil {
+						block.AttestationDuties[types.ValidatorIndex(validator)] = []types.Slot{types.Slot(a.Data.Slot)}
+					} else {
+						block.AttestationDuties[types.ValidatorIndex(validator)] = append(block.AttestationDuties[types.ValidatorIndex(validator)], types.Slot(a.Data.Slot))
+					}
 				}
 			}
 		}
@@ -1552,6 +1583,7 @@ type AttesterSlashing struct {
 
 type Attestation struct {
 	AggregationBits string `json:"aggregation_bits"`
+	CommitteeBits   string `json:"committee_bits"`
 	Signature       string `json:"signature"`
 	Data            struct {
 		Slot            uint64Str `json:"slot"`
