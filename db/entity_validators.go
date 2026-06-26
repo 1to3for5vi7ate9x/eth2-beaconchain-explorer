@@ -105,6 +105,13 @@ func GetValidatorEfficienciesForPeriod(period string, indices []int) (map[int]fl
 		result[index] = -1
 	}
 
+	// ClickHouse is an optional accelerator; when it is disabled it is never initialized
+	// (ClickhouseReaderDb stays nil). Return the seeded "unavailable" (-1) map instead of
+	// dereferencing the nil handle, which would panic.
+	if ClickhouseReaderDb == nil {
+		return result, nil
+	}
+
 	var table string
 	switch period {
 	case "1d":

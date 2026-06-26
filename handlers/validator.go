@@ -26,6 +26,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lib/pq"
 	protomath "github.com/protolambda/zrnt/eth2/util/math"
 	"golang.org/x/sync/errgroup"
@@ -38,6 +39,20 @@ import (
 )
 
 var validatorEditFlash = "edit_validator_flash"
+
+// isUndefinedTable reports whether err is a Postgres "undefined_table" (42P01) error.
+// The execution-layer request tables (withdrawals, consolidations, compounding switches,
+// deposits, exits) are provisioned by a later migration; until then, treat a missing
+// table as "no data" so the validator page still renders instead of returning 500.
+// The main DB uses the pgx driver (errors are *pgconn.PgError); lib/pq is kept as a fallback.
+func isUndefinedTable(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "42P01"
+	}
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "42P01"
+}
 
 // Validator returns validator data using a go template
 func Validator(w http.ResponseWriter, r *http.Request) {
@@ -497,17 +512,23 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 			Divisor  float64 `db:"divisor"`
 		}
 		var rows []chRow
-		err := db.ClickhouseReaderDb.Select(&rows, `
-			SELECT toUnixTimestamp(toStartOfDay(t)) AS ts,
-			       sum(efficiency_dividend)        AS dividend,
-			       sum(efficiency_divisor)         AS divisor
-			FROM validator_dashboard_data_daily
-			WHERE validator_index = $1 AND t >= today() - 30
-			GROUP BY ts
-			ORDER BY ts
-		`, index)
-		if err != nil {
-			return fmt.Errorf("error getting validator beaconscore history (30d): %w", err)
+		// ClickHouse is an optional accelerator; when it is disabled db.ClickhouseReaderDb
+		// is nil. Skip the query (leaving an empty beaconscore chart) instead of
+		// dereferencing the nil handle — this runs in an errgroup goroutine, so a panic
+		// here is NOT recovered by net/http and crashes the whole explorer process.
+		if utils.Config.ClickHouseEnabled {
+			err := db.ClickhouseReaderDb.Select(&rows, `
+				SELECT toUnixTimestamp(toStartOfDay(t)) AS ts,
+				       sum(efficiency_dividend)        AS dividend,
+				       sum(efficiency_divisor)         AS divisor
+				FROM validator_dashboard_data_daily
+				WHERE validator_index = $1 AND t >= today() - 30
+				GROUP BY ts
+				ORDER BY ts
+			`, index)
+			if err != nil {
+				return fmt.Errorf("error getting validator beaconscore history (30d): %w", err)
+			}
 		}
 
 		// Build [timestamp_sec, efficiency] points, skipping rows with zero divisor
@@ -868,6 +889,13 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 	})
 
 	g.Go(func() error {
+		// ClickHouse is an optional accelerator; when it is disabled db.ClickhouseReaderDb
+		// is nil. Skip (leaving Beaconscore at its zero value) instead of dereferencing the
+		// nil handle — this runs in an errgroup goroutine, so a panic here is NOT recovered
+		// by net/http and crashes the whole explorer process.
+		if !utils.Config.ClickHouseEnabled {
+			return nil
+		}
 		efficiency := struct {
 			Dividend decimal.Decimal `db:"dividend"`
 			Divisor  decimal.Decimal `db:"divisor"`
@@ -1039,6 +1067,9 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 			AND blocks_consolidation_requests_v2.status = 'completed'
 		ORDER BY slot_processed DESC, index_processed`, index)
 		if err != nil {
+			if isUndefinedTable(err) {
+				return nil
+			}
 			return fmt.Errorf("error retrieving blocks_consolidation_requests_v2 of validator %v: %v", validatorPageData.Index, err)
 		}
 
@@ -1073,6 +1104,9 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				validatorPageData.MoveToCompoundingRequest = nil
+				return nil
+			}
+			if isUndefinedTable(err) {
 				return nil
 			}
 			return fmt.Errorf("error retrieving blocks_switch_to_compounding_requests of validator %v: %v", validatorPageData.Index, err)
@@ -1113,6 +1147,9 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 				validatorPageData.ConsensusElExits = nil
 				return nil
 			}
+			if isUndefinedTable(err) {
+				return nil
+			}
 			return fmt.Errorf("error retrieving blocks_exit_requests/blocks_voluntaryexits of validator %v: %v", validatorPageData.Index, err)
 		}
 		return nil
@@ -1132,6 +1169,9 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 		WHERE validatorindex = $1
 		ORDER BY block_number DESC, tx_index desc, itx_index desc`, index)
 		if err != nil {
+			if isUndefinedTable(err) {
+				return nil
+			}
 			return fmt.Errorf("error retrieving eth1_withdrawal_requests of validator %v: %v", validatorPageData.Index, err)
 		}
 
@@ -1161,6 +1201,9 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 		ORDER BY ecr.block_number DESC, ecr.tx_index DESC, ecr.itx_index DESC
 		`, index)
 		if err != nil {
+			if isUndefinedTable(err) {
+				return nil
+			}
 			return fmt.Errorf("error retrieving eth1_consolidation_requests of validator %v: %v", validatorPageData.Index, err)
 		}
 
@@ -1194,6 +1237,9 @@ func Validator(w http.ResponseWriter, r *http.Request) {
 		AND blocks_withdrawal_requests_v2.status = 'completed'
 		ORDER BY slot_processed DESC, index_processed`, validatorPageData.PublicKey)
 		if err != nil {
+			if isUndefinedTable(err) {
+				return nil
+			}
 			return fmt.Errorf("error retrieving blocks_withdrawal_requests_v2 of validator %v: %v", validatorPageData.Index, err)
 		}
 
