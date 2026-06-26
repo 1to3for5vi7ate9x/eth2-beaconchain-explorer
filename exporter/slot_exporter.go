@@ -276,32 +276,24 @@ func ExportSlot(client rpc.Client, slot uint64, isHeadEpoch bool, tx *sqlx.Tx) e
 			attDutiesEpoch[types.Slot(attestedSlot)][types.ValidatorIndex(validatorIndex)] = []types.Slot{}
 		}
 
+		// Route the heavy per-epoch bigtable writes (whole-epoch attestation & sync
+		// committee duty assignments + the full ~1.4M validator balance snapshot) to the
+		// single ordered background worker so the postgres block/epoch commit below no
+		// longer waits on them. "Most recent blocks" then tracks the chain head live;
+		// validator history trails by the worker depth (steady-state ~110s/epoch, well
+		// under the 6.4-min budget). FIFO ordering means these assignments are written
+		// before the per-slot inclusions enqueued later — identical to the old inline path.
+		enqueueBigtableWrite(fmt.Sprintf("epoch %v attestation duties", epoch), func() error {
+			return db.BigtableClient.SaveAttestationDuties(attDutiesEpoch)
+		})
+		enqueueBigtableWrite(fmt.Sprintf("epoch %v sync committee duties", epoch), func() error {
+			return db.BigtableClient.SaveSyncComitteeDuties(syncDutiesEpoch)
+		})
+		enqueueBigtableWrite(fmt.Sprintf("epoch %v validator balances", epoch), func() error {
+			return db.BigtableClient.SaveValidatorBalances(epoch, block.Validators)
+		})
+
 		g := errgroup.Group{}
-
-		// save all duties to bigtable
-		g.Go(func() error {
-			err := db.BigtableClient.SaveAttestationDuties(attDutiesEpoch)
-			if err != nil {
-				return fmt.Errorf("error exporting attestation assignments to bigtable for slot %v: %w", block.Slot, err)
-			}
-			return nil
-		})
-		g.Go(func() error {
-			err := db.BigtableClient.SaveSyncComitteeDuties(syncDutiesEpoch)
-			if err != nil {
-				return fmt.Errorf("error exporting sync committee assignments to bigtable for slot %v: %w", block.Slot, err)
-			}
-			return nil
-		})
-
-		// save the validator balances to bigtable
-		g.Go(func() error {
-			err := db.BigtableClient.SaveValidatorBalances(epoch, block.Validators)
-			if err != nil {
-				return fmt.Errorf("error exporting validator balances to bigtable for slot %v: %w", block.Slot, err)
-			}
-			return nil
-		})
 		// if we are exporting the head epoch, update the validator db table
 		if isHeadEpoch {
 			g.Go(func() error {
@@ -381,15 +373,15 @@ func ExportSlot(client rpc.Client, slot uint64, isHeadEpoch bool, tx *sqlx.Tx) e
 		}
 	}
 
-	// save sync & attestation duties to bigtable
-	err = db.BigtableClient.SaveAttestationDuties(attDuties)
-	if err != nil {
-		return fmt.Errorf("error exporting attestations to bigtable for slot %v: %w", block.Slot, err)
-	}
-	err = db.BigtableClient.SaveSyncComitteeDuties(syncDuties)
-	if err != nil {
-		return fmt.Errorf("error exporting sync committee duties to bigtable for slot %v: %w", block.Slot, err)
-	}
+	// Route this slot's attestation & sync-committee duty bigtable writes through the
+	// same ordered worker; they are applied after this epoch's assignments and never
+	// block the block commit (so the slot is visible immediately).
+	enqueueBigtableWrite(fmt.Sprintf("slot %v attestations", block.Slot), func() error {
+		return db.BigtableClient.SaveAttestationDuties(attDuties)
+	})
+	enqueueBigtableWrite(fmt.Sprintf("slot %v sync committee duties", block.Slot), func() error {
+		return db.BigtableClient.SaveSyncComitteeDuties(syncDuties)
+	})
 
 	// save the block data to the db
 	err = db.SaveBlock(block, false, tx)

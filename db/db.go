@@ -1258,9 +1258,15 @@ func SaveValidators(epoch uint64, validators []*types.Validator, client rpc.Clie
 			if balanceCache[newValidator.ActivationEpoch] == nil {
 				balances, err := client.GetBalancesForEpoch(int64(newValidator.ActivationEpoch))
 				if err != nil {
-					return fmt.Errorf("error retrieving balances for epoch %d: %v", newValidator.ActivationEpoch, err)
+					// Non-archive node can't serve this pruned activation epoch in
+					// current-forward mode. Default the activation balance to 0 instead of
+					// failing the whole export run; cache an empty result so we don't re-hit
+					// the node for every other validator activated in the same epoch.
+					logger.Warnf("activation-epoch balance for epoch %v unavailable on non-archive node (current-forward), defaulting to 0: %v", newValidator.ActivationEpoch, err)
+					balanceCache[newValidator.ActivationEpoch] = map[uint64]uint64{}
+				} else {
+					balanceCache[newValidator.ActivationEpoch] = balances
 				}
-				balanceCache[newValidator.ActivationEpoch] = balances
 			}
 			foundBalance = balanceCache[newValidator.ActivationEpoch][newValidator.Validatorindex]
 		} else {
