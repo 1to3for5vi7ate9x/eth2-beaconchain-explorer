@@ -1396,8 +1396,8 @@ func saveBlocks(blocks map[uint64]map[string]*types.Block, tx *sqlx.Tx, forceSlo
 	defer stmtAttesterSlashing.Close()
 
 	stmtAttestations, err := tx.Prepare(`
-		INSERT INTO blocks_attestations (block_slot, block_index, block_root, aggregationbits, validators, signature, slot, committeeindex, beaconblockroot, source_epoch, source_root, target_epoch, target_root)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		INSERT INTO blocks_attestations (block_slot, block_index, block_root, aggregationbits, committeebits, validators, signature, slot, committeeindex, beaconblockroot, source_epoch, source_root, target_epoch, target_root)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT (block_slot, block_index) DO NOTHING`)
 	if err != nil {
 		return err
@@ -1641,7 +1641,7 @@ func saveBlocks(blocks map[uint64]map[string]*types.Block, tx *sqlx.Tx, forceSlo
 			blockLog.WithField("duration", time.Since(t)).Tracef("stmtAttesterSlashing")
 			t = time.Now()
 			for i, a := range b.Attestations {
-				_, err = stmtAttestations.Exec(b.Slot, i, b.BlockRoot, a.AggregationBits, pq.Array(a.Attesters), a.Signature, a.Data.Slot, a.Data.CommitteeIndex, a.Data.BeaconBlockRoot, a.Data.Source.Epoch, a.Data.Source.Root, a.Data.Target.Epoch, a.Data.Target.Root)
+				_, err = stmtAttestations.Exec(b.Slot, i, b.BlockRoot, a.AggregationBits, a.CommitteeBits, pq.Array(a.Attesters), a.Signature, a.Data.Slot, a.Data.CommitteeIndex, a.Data.BeaconBlockRoot, a.Data.Source.Epoch, a.Data.Source.Root, a.Data.Target.Epoch, a.Data.Target.Root)
 				if err != nil {
 					return fmt.Errorf("error executing stmtAttestations for block %v index %v: %w", b.Slot, i, err)
 				}

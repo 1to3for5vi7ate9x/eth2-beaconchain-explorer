@@ -1154,6 +1154,7 @@ func (lc *LighthouseClient) blockFromResponse(parsedHeaders *StandardBeaconHeade
 			// index within the committee. Walk committees in order, consuming one aggregation bit per
 			// committee member.
 			committeeBits := utils.MustParseHex(attestation.CommitteeBits)
+			a.CommitteeBits = committeeBits
 			bitOffset := uint64(0)
 			for c := uint64(0); c < uint64(len(committeeBits))*8; c++ {
 				if committeeBits[c/8]&(1<<(c%8)) == 0 {

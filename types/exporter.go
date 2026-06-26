@@ -244,6 +244,7 @@ type IndexedAttestation struct {
 // Attestation is a struct to hold attestation header data
 type Attestation struct {
 	AggregationBits []byte
+	CommitteeBits   []byte
 	Attesters       []uint64
 	Data            *AttestationData
 	Signature       []byte
