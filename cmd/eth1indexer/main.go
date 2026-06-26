@@ -258,7 +258,7 @@ func main() {
 	var lastBlockFromNodeOld uint64
 	var lastBlockFromNodeSameCount uint64
 	lastSuccessulBlockIndexingTs := time.Now()
-	for ; ; time.Sleep(time.Second * 14) {
+	for ; ; time.Sleep(time.Second * 4) {
 		err := HandleChainReorgs(bt, client, *reorgDepth)
 		if err != nil {
 			logrus.Errorf("error handling chain reorgs: %v", err)
@@ -268,7 +268,7 @@ func main() {
 		lastBlockFromNode, err := client.GetLatestEth1BlockNumber()
 		if err != nil {
 			lastBlockFromNodeSameCount++
-			if lastBlockFromNodeSameCount > 20 { // nearly 5 minutes no new block
+			if lastBlockFromNodeSameCount > 70 { // nearly 5 minutes no new block
 				utils.LogFatal(err, "no new block in 20 tries", 0, map[string]interface{}{
 					"lastBlockFromNode": lastBlockFromNodeOld,
 				})
@@ -281,7 +281,7 @@ func main() {
 			lastBlockFromNodeSameCount = 0
 		} else {
 			lastBlockFromNodeSameCount++
-			if lastBlockFromNodeSameCount > 20 { // nearly 5 minutes no new block
+			if lastBlockFromNodeSameCount > 70 { // nearly 5 minutes no new block
 				utils.LogFatal(nil, "no new block in 20 tries", 0, map[string]interface{}{
 					"lastBlockFromNode": lastBlockFromNodeOld,
 				})
