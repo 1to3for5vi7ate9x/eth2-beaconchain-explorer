@@ -73,6 +73,10 @@ CREATE TABLE IF NOT EXISTS blocks_exit_requests (
     block_processed_root bytea,
     reject_reason text
 );
+
+-- pending_deposits_queue exists (migration 20250409140914) but is missing request_id,
+-- which exporter/queues.go matchDepositRequests UPDATEs once blocks_deposit_requests_v2 exists.
+ALTER TABLE pending_deposits_queue ADD COLUMN IF NOT EXISTS request_id bigint;
 -- +goose StatementEnd
 
 -- +goose Down
@@ -84,5 +88,6 @@ DROP TABLE IF EXISTS blocks_consolidation_requests_v2;
 DROP TABLE IF EXISTS blocks_switch_to_compounding_requests_v2;
 DROP TABLE IF EXISTS blocks_switch_to_compounding_requests;
 DROP TABLE IF EXISTS blocks_exit_requests;
+ALTER TABLE pending_deposits_queue DROP COLUMN IF EXISTS request_id;
 ALTER TABLE blocks_attestations DROP COLUMN IF EXISTS committeebits;
 -- +goose StatementEnd
